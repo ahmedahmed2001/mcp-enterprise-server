@@ -1,0 +1,10 @@
+mcp[cli]>=1.0.0
+groq>=0.4.0
+streamlit>=1.30.0
+httpx>=0.25.0
+uvicorn>=0.25.0
+tenacity>=8.2.0
+python-dotenv>=1.0.0
+PyGithub>=2.1.0
+pyyaml>=6.0
+fastapi>=0.109.0

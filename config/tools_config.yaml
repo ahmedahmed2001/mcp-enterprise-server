@@ -1,0 +1,68 @@
+# ═══════════════════════════════════════════════════════════════
+# Configuration des outils MCP
+# ═══════════════════════════════════════════════════════════════
+# 
+# Pour ajouter un nouvel outil :
+# 1. Créer le fichier Python dans tools/ (ex: tools/slack_tools.py)
+# 2. Écrire vos fonctions avec des docstrings claires
+# 3. Ajouter la configuration ci-dessous
+# 4. Redémarrer le serveur : sudo systemctl restart mcp
+#
+# Format :
+#   nom_outil:
+#     enabled: true/false
+#     module: tools.nom_du_fichier
+#     description: "Description de l'outil"
+#     functions:
+#       - nom_fonction_1
+#       - nom_fonction_2
+# ═══════════════════════════════════════════════════════════════
+
+tools:
+  # Outils pour documents locaux
+  local:
+    enabled: true
+    module: tools.local_tools
+    description: "Gestion des documents locaux stockés sur le serveur"
+    functions:
+      - list_documents
+      - search_and_read
+      - get_time
+  
+  # Outils GitHub
+  github:
+    enabled: true
+    module: tools.github_tools
+    description: "Intégration avec l'API GitHub (lecture seule)"
+    functions:
+      - list_github_repos
+      - list_github_files
+      - read_github_file
+      - write_github_file
+      - scan_all_repos
+      - deep_scan_repo
+      - analyze_commits
+      - detect_code_issues
+      - generate_readme
+      - auto_fix_repo
+      - quality_report
+
+# ═══════════════════════════════════════════════════════════════
+# Exemples pour ajouter d'autres outils :
+# ═══════════════════════════════════════════════════════════════
+#
+#  slack:
+#    enabled: true
+#    module: tools.slack_tools
+#    description: "Intégration Slack"
+#    functions:
+#      - send_message
+#      - list_channels
+#
+#  database:
+#    enabled: false  # Désactivé pour l'instant
+#    module: tools.database_tools
+#    description: "Requêtes SQL"
+#    functions:
+#      - execute_query
+#      - list_tables
