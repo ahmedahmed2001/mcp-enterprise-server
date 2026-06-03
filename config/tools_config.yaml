@@ -46,6 +46,9 @@ tools:
       - generate_readme
       - auto_fix_repo
       - quality_report
+      - analyze_pull_request
+      - comment_on_pull_request
+      - request_changes_on_pr
 
 # ═══════════════════════════════════════════════════════════════
 # Exemples pour ajouter d'autres outils :

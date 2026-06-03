@@ -675,3 +675,371 @@ def quality_report(repo_name: str) -> dict:
     except Exception as e:
         logger.error(f"❌ Erreur rapport : {e}")
         return {"error": str(e)}
+# ═══════════════════════════════════════════════════════════════
+# ANALYSE DES PULL REQUESTS
+# ═══════════════════════════════════════════════════════════════
+
+def analyze_pull_request(repo_name: str, pr_number: int) -> dict:
+    """
+    Analyse une Pull Request et vérifie sa conformité avec le template
+    Retourne un score et des recommandations détaillées
+    """
+    logger.info(f"🔍 Analyse PR #{pr_number} dans {repo_name}")
+    
+    if not GITHUB_TOKEN:
+        return {"error": "Token GitHub non configuré"}
+    
+    try:
+        client = _get_github_client()
+        repo = client.get_repo(f"{GITHUB_ORG}/{repo_name}")
+        pr = repo.get_pull(pr_number)
+        
+        # ── Récupérer toutes les infos de la PR ──────────────────
+        pr_data = {
+            "number": pr.number,
+            "title": pr.title,
+            "body": pr.body or "",
+            "author": pr.user.login,
+            "base_branch": pr.base.ref,
+            "head_branch": pr.head.ref,
+            "files_changed": pr.changed_files,
+            "additions": pr.additions,
+            "deletions": pr.deletions,
+            "commits": pr.commits,
+            "labels": [l.name for l in pr.labels],
+            "draft": pr.draft
+        }
+        
+        # ── Analyse du titre ─────────────────────────────────────
+        title_analysis = _analyze_pr_title(pr.title)
+        
+        # ── Analyse de la description ────────────────────────────
+        body_analysis = _analyze_pr_body(pr.body or "")
+        
+        # ── Analyse des fichiers modifiés ────────────────────────
+        files_analysis = _analyze_pr_files(pr)
+        
+        # ── Calcul du score global ───────────────────────────────
+        score = _calculate_pr_score(title_analysis, body_analysis, files_analysis, pr_data)
+        
+        # ── Déterminer la sévérité ───────────────────────────────
+        if score >= 80:
+            severity = "good"
+            action = "approve_with_comments"
+        elif score >= 60:
+            severity = "warning"
+            action = "comment_suggestions"
+        else:
+            severity = "critical"
+            action = "request_changes"
+        
+        return {
+            "pr_number": pr_number,
+            "repo": repo_name,
+            "score": score,
+            "severity": severity,
+            "action": action,
+            "pr_data": pr_data,
+            "title_analysis": title_analysis,
+            "body_analysis": body_analysis,
+            "files_analysis": files_analysis,
+            "summary": _generate_pr_summary(score, title_analysis, body_analysis, files_analysis)
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Erreur analyse PR : {e}")
+        return {"error": str(e)}
+
+
+def _analyze_pr_title(title: str) -> dict:
+    """Analyse le titre de la PR"""
+    issues = []
+    suggestions = []
+    score = 100
+    
+    # Vérifier la longueur
+    if len(title) < 10:
+        issues.append("Titre trop court (minimum 10 caractères)")
+        suggestions.append("Sois plus descriptif : 'fix: correction du crash sur la page login'")
+        score -= 30
+    elif len(title) > 72:
+        issues.append("Titre trop long (maximum 72 caractères)")
+        suggestions.append("Raccourcis le titre, mets les détails dans la description")
+        score -= 10
+    
+    # Vérifier le format conventionnel (feat:, fix:, docs:, etc.)
+    conventional_prefixes = ['feat:', 'fix:', 'docs:', 'style:', 'refactor:', 
+                             'test:', 'chore:', 'perf:', 'ci:', 'build:']
+    has_prefix = any(title.lower().startswith(p) for p in conventional_prefixes)
+    
+    if not has_prefix:
+        issues.append("Le titre ne suit pas le format conventionnel")
+        suggestions.append("Utilise un préfixe : feat:, fix:, docs:, refactor:, test:, chore:")
+        score -= 25
+    
+    # Vérifier les titres vagues
+    vague_titles = ['fix', 'update', 'change', 'wip', 'test', 'minor', 
+                    'fix bug', 'bug fix', 'changes', 'update code']
+    if title.lower().strip() in vague_titles:
+        issues.append("Titre trop vague")
+        suggestions.append("Décris précisément ce que la PR fait")
+        score -= 40
+    
+    # Vérifier majuscule après le préfixe
+    if has_prefix and ':' in title:
+        after_prefix = title.split(':', 1)[1].strip()
+        if after_prefix and after_prefix[0].isupper():
+            issues.append("La description après le préfixe ne doit pas commencer par une majuscule")
+            suggestions.append(f"Exemple : '{title.split(':')[0]}: {after_prefix[0].lower()}{after_prefix[1:]}'")
+            score -= 5
+    
+    return {
+        "score": max(0, score),
+        "issues": issues,
+        "suggestions": suggestions,
+        "has_conventional_prefix": has_prefix,
+        "length": len(title)
+    }
+
+
+def _analyze_pr_body(body: str) -> dict:
+    """Analyse la description de la PR"""
+    issues = []
+    suggestions = []
+    score = 100
+    
+    # Vérifier si la description est vide
+    if not body or len(body.strip()) < 20:
+        issues.append("Description vide ou trop courte")
+        suggestions.append("Explique le contexte, pourquoi ce changement, et comment tu l'as testé")
+        score -= 50
+        return {"score": 0, "issues": issues, "suggestions": suggestions}
+    
+    body_lower = body.lower()
+    
+    # Vérifier la section Description
+    if '## 📋 description' not in body_lower and '## description' not in body_lower:
+        issues.append("Section 'Description' manquante")
+        suggestions.append("Ajoute une section ## Description avec au moins 50 caractères")
+        score -= 20
+    
+    # Vérifier le type de changement coché
+    has_checked_type = '- [x]' in body_lower
+    if not has_checked_type:
+        issues.append("Aucun type de changement coché")
+        suggestions.append("Coche au moins un type : Bug fix, Feature, Refactoring, etc.")
+        score -= 15
+    
+    # Vérifier le lien vers une issue
+    has_issue_link = any(keyword in body_lower for keyword in 
+                         ['fixes #', 'closes #', 'resolves #', 'fix #', 'close #'])
+    if not has_issue_link:
+        issues.append("Pas de lien vers une issue")
+        suggestions.append("Ajoute 'Fixes #NUMERO' pour lier automatiquement l'issue")
+        score -= 15
+    
+    # Vérifier la checklist
+    checklist_items = body.count('- [x]') + body.count('- [ ]')
+    checked_items = body.count('- [x]')
+    
+    if checklist_items == 0:
+        issues.append("Checklist absente")
+        suggestions.append("Ajoute une checklist pour confirmer la qualité du code")
+        score -= 10
+    elif checked_items == 0:
+        issues.append("Aucune case de la checklist n'est cochée")
+        suggestions.append("Coche les cases de la checklist qui s'appliquent")
+        score -= 10
+    
+    # Vérifier si les placeholders sont encore présents
+    if '<!-- ' in body and ' -->' in body:
+        issues.append("Des commentaires de template non remplis sont présents")
+        suggestions.append("Remplis tous les champs du template et supprime les commentaires")
+        score -= 10
+    
+    return {
+        "score": max(0, score),
+        "issues": issues,
+        "suggestions": suggestions,
+        "has_issue_link": has_issue_link,
+        "has_checked_type": has_checked_type,
+        "checklist_total": checklist_items,
+        "checklist_checked": checked_items,
+        "word_count": len(body.split())
+    }
+
+
+def _analyze_pr_files(pr) -> dict:
+    """Analyse les fichiers modifiés dans la PR"""
+    issues = []
+    suggestions = []
+    score = 100
+    
+    try:
+        files = list(pr.get_files())
+        
+        # PR trop grande
+        if pr.changed_files > 20:
+            issues.append(f"PR trop grande ({pr.changed_files} fichiers modifiés)")
+            suggestions.append("Découpe en plusieurs PRs plus petites et ciblées")
+            score -= 25
+        elif pr.changed_files > 10:
+            issues.append(f"PR assez grande ({pr.changed_files} fichiers)")
+            suggestions.append("Considère de découper si les changements ne sont pas liés")
+            score -= 10
+        
+        # Trop de lignes modifiées
+        total_changes = pr.additions + pr.deletions
+        if total_changes > 500:
+            issues.append(f"Beaucoup de changements ({total_changes} lignes)")
+            suggestions.append("Les grandes PRs sont difficiles à reviewer")
+            score -= 15
+        
+        # Vérifier fichiers sensibles
+        sensitive_files = ['.env', 'secrets', 'password', 'private_key', 'id_rsa']
+        for f in files:
+            if any(s in f.filename.lower() for s in sensitive_files):
+                issues.append(f"⚠️ Fichier sensible détecté : {f.filename}")
+                suggestions.append(f"Vérifie que {f.filename} ne contient pas de secrets")
+                score -= 30
+        
+        return {
+            "score": max(0, score),
+            "issues": issues,
+            "suggestions": suggestions,
+            "files_count": pr.changed_files,
+            "additions": pr.additions,
+            "deletions": pr.deletions,
+            "total_changes": total_changes
+        }
+    
+    except Exception as e:
+        return {"score": 80, "issues": [], "suggestions": [], "error": str(e)}
+
+
+def _calculate_pr_score(title_analysis, body_analysis, files_analysis, pr_data) -> int:
+    """Calcule le score global de la PR"""
+    # Poids de chaque section
+    title_weight = 0.30   # 30%
+    body_weight = 0.50    # 50%
+    files_weight = 0.20   # 20%
+    
+    score = (
+        title_analysis["score"] * title_weight +
+        body_analysis["score"] * body_weight +
+        files_analysis["score"] * files_weight
+    )
+    
+    # Bonus si PR en draft (le dev sait que c'est pas fini)
+    if pr_data.get("draft"):
+        score = min(100, score + 10)
+    
+    return round(score)
+
+
+def _generate_pr_summary(score, title_analysis, body_analysis, files_analysis) -> str:
+    """Génère un résumé lisible pour le commentaire GitHub"""
+    
+    if score >= 80:
+        header = "✅ **Bonne PR !** Quelques suggestions mineures."
+    elif score >= 60:
+        header = "⚠️ **PR à améliorer.** Des changements sont recommandés."
+    else:
+        header = "❌ **PR non conforme.** Des changements sont requis avant review."
+    
+    summary = f"""{header}
+
+## 📊 Score : {score}/100
+
+| Section | Score | Statut |
+|---------|-------|--------|
+| 📝 Titre | {title_analysis['score']}/100 | {'✅' if title_analysis['score'] >= 70 else '❌'} |
+| 📋 Description | {body_analysis['score']}/100 | {'✅' if body_analysis['score'] >= 70 else '❌'} |
+| 📁 Fichiers | {files_analysis['score']}/100 | {'✅' if files_analysis['score'] >= 70 else '❌'} |
+
+"""
+    
+    # Problèmes détectés
+    all_issues = (
+        title_analysis.get("issues", []) +
+        body_analysis.get("issues", []) +
+        files_analysis.get("issues", [])
+    )
+    
+    if all_issues:
+        summary += "## ❌ Problèmes détectés\n\n"
+        for issue in all_issues:
+            summary += f"- {issue}\n"
+        summary += "\n"
+    
+    # Suggestions
+    all_suggestions = (
+        title_analysis.get("suggestions", []) +
+        body_analysis.get("suggestions", []) +
+        files_analysis.get("suggestions", [])
+    )
+    
+    if all_suggestions:
+        summary += "## 💡 Suggestions\n\n"
+        for suggestion in all_suggestions:
+            summary += f"- {suggestion}\n"
+        summary += "\n"
+    
+    summary += "---\n*Analyse automatique par MCP Agent 🤖*"
+    
+    return summary
+
+
+def comment_on_pull_request(repo_name: str, pr_number: int, comment: str) -> dict:
+    """Ajoute un commentaire sur une Pull Request"""
+    logger.info(f"💬 Commentaire sur PR #{pr_number}")
+    
+    if not GITHUB_TOKEN:
+        return {"error": "Token GitHub non configuré"}
+    
+    try:
+        client = _get_github_client()
+        repo = client.get_repo(f"{GITHUB_ORG}/{repo_name}")
+        pr = repo.get_pull(pr_number)
+        
+        pr.create_issue_comment(comment)
+        
+        logger.info("✅ Commentaire ajouté")
+        return {
+            "status": "success",
+            "pr_number": pr_number,
+            "repo": repo_name
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Erreur commentaire : {e}")
+        return {"error": str(e)}
+
+
+def request_changes_on_pr(repo_name: str, pr_number: int, comment: str) -> dict:
+    """Demande des modifications sur une Pull Request (bloque le merge)"""
+    logger.info(f"🚫 Request changes sur PR #{pr_number}")
+    
+    if not GITHUB_TOKEN:
+        return {"error": "Token GitHub non configuré"}
+    
+    try:
+        client = _get_github_client()
+        repo = client.get_repo(f"{GITHUB_ORG}/{repo_name}")
+        pr = repo.get_pull(pr_number)
+        
+        pr.create_review(
+            body=comment,
+            event="REQUEST_CHANGES"
+        )
+        
+        logger.info("✅ Request changes soumis")
+        return {
+            "status": "changes_requested",
+            "pr_number": pr_number,
+            "repo": repo_name
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Erreur request changes : {e}")
+        return {"error": str(e)}

@@ -343,6 +343,61 @@ async def github_webhook(payload: dict):
             "error": str(e),
             "repository": repo_name
         }, status_code=500)
+        
+@app.post("/pr-review")
+async def pr_review_webhook(payload: dict):
+    """
+    Endpoint appelé par GitHub Actions pour analyser une PR
+    """
+    logger.info("🔍 Analyse de PR reçue")
+    
+    repo_name = payload.get("repository")
+    pr_number = payload.get("pr_number")
+    
+    if not repo_name or not pr_number:
+        return JSONResponse({
+            "error": "repository et pr_number requis"
+        }, status_code=400)
+    
+    try:
+        from tools.github_tools import (
+            analyze_pull_request,
+            comment_on_pull_request,
+            request_changes_on_pr
+        )
+        
+        # Analyser la PR
+        analysis = analyze_pull_request(repo_name, int(pr_number))
+        
+        if "error" in analysis:
+            return JSONResponse(analysis, status_code=500)
+        
+        score = analysis["score"]
+        action = analysis["action"]
+        summary = analysis["summary"]
+        
+        # Agir selon le score
+        if score < 60:
+            # Bloquant : demander des modifications
+            result = request_changes_on_pr(repo_name, int(pr_number), summary)
+            action_taken = "request_changes"
+        else:
+            # Non bloquant : juste commenter
+            result = comment_on_pull_request(repo_name, int(pr_number), summary)
+            action_taken = "comment"
+        
+        logger.info(f"✅ PR #{pr_number} analysée - Score: {score} - Action: {action_taken}")
+        
+        return JSONResponse({
+            "pr_number": pr_number,
+            "score": score,
+            "action_taken": action_taken,
+            "analysis": analysis
+        })
+    
+    except Exception as e:
+        logger.error(f"❌ Erreur pr-review : {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
     
 # ═══════════════════════════════════════════════════════════════
 # DÉMARRAGE DU SERVEUR
