@@ -377,14 +377,9 @@ async def pr_review_webhook(payload: dict):
         summary = analysis["summary"]
         
         # Agir selon le score
-        if score < 60:
-            # Bloquant : demander des modifications
-            result = request_changes_on_pr(repo_name, int(pr_number), summary)
-            action_taken = "request_changes"
-        else:
-            # Non bloquant : juste commenter
-            result = comment_on_pull_request(repo_name, int(pr_number), summary)
-            action_taken = "comment"
+        result = comment_on_pull_request(repo_name, int(pr_number), summary)
+        action_taken = "comment"
+        logger.info(f"Score: {score} - Commentaire posté")   
         
         logger.info(f"✅ PR #{pr_number} analysée - Score: {score} - Action: {action_taken}")
         
