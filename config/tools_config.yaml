@@ -49,6 +49,9 @@ tools:
       - analyze_pull_request
       - comment_on_pull_request
       - request_changes_on_pr
+      - list_pull_requests
+      - get_pull_request
+      - get_pr_diff
 
 # ═══════════════════════════════════════════════════════════════
 # Exemples pour ajouter d'autres outils :

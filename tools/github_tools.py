@@ -183,6 +183,70 @@ def write_github_file(repo_name: str, file_path: str, content: str, commit_messa
 # ═══════════════════════════════════════════════════════════════
 # NIVEAU 1 : CRUD AVANCÉ
 # ═══════════════════════════════════════════════════════════════
+def list_pull_requests(repo_name: str, state: str = "open") -> dict:
+    logger.info(f"📥 list_pull_requests repo={repo_name}")
+
+    if not GITHUB_TOKEN:
+        return {"error": "Token GitHub non configuré"}
+
+    try:
+        client = _get_github_client()
+        repo = client.get_repo(f"{GITHUB_ORG}/{repo_name}")
+
+        pulls = repo.get_pulls(state=state)
+
+        result = []
+        for pr in pulls:
+            result.append({
+                "number": pr.number,
+                "title": pr.title,
+                "state": pr.state,
+                "author": pr.user.login,
+                "created_at": pr.created_at.isoformat(),
+                "url": pr.html_url
+            })
+
+        return {
+            "repo": repo_name,
+            "count": len(result),
+            "pull_requests": result
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_pull_request(repo_name: str, pr_number: int) -> dict:
+    client = _get_github_client()
+    repo = client.get_repo(f"{GITHUB_ORG}/{repo_name}")
+    pr = repo.get_pull(pr_number)
+
+    return {
+        "number": pr.number,
+        "title": pr.title,
+        "body": pr.body,
+        "author": pr.user.login,
+        "state": pr.state,
+        "additions": pr.additions,
+        "deletions": pr.deletions,
+        "changed_files": pr.changed_files
+    }
+    
+
+def get_pr_diff(repo_name: str, pr_number: int) -> dict:
+    client = _get_github_client()
+    repo = client.get_repo(f"{GITHUB_ORG}/{repo_name}")
+    pr = repo.get_pull(pr_number)
+
+    diff = pr.diff_url
+
+    import requests
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    r = requests.get(diff, headers=headers)
+
+    return {
+        "pr": pr_number,
+        "diff": r.text[:10000]  # limite
+    }
 
 def scan_all_repos() -> dict:
     """Scan complet de tous les repositories avec métadonnées enrichies"""
